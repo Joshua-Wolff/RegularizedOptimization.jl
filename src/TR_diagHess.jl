@@ -23,7 +23,7 @@ function TR_diagHess(
   Δk = options.Δk
   Δmax = 1000 * options.Δk
   verbose = options.verbose
-  maxIter = 1000000#options.maxIter
+  maxIter = options.maxIter
   maxTime = options.maxTime
   η1 = options.η1
   η2 = options.η2
@@ -56,8 +56,8 @@ function TR_diagHess(
   ∇fk = grad(f, xk)
   ∇fk⁻ = copy(∇fk)
   # compute initial diagonal hessian (for the moment we use the identity as initialization)
-  Dk = DiagonalQN(ones(eltype(xk), length(xk)))
-  #Dk = SpectralGradient(one(eltype(xk)),length(xk))
+  #Dk = DiagonalQN(ones(eltype(xk), length(xk)))
+  Dk = SpectralGradient(one(eltype(xk)),length(xk))
 
   optimal = false
   tired = k ≥ maxIter || elapsed_time > maxTime
@@ -98,7 +98,6 @@ function TR_diagHess(
 
     # compute ξ and ratio ρk
     xkn .= xk .+ s
-    println(norm(s,2))
     fkn = obj(f, xkn)
     hkn = h(xkn[selected])
     hkn == -Inf && error("nonsmooth term is not proper")
@@ -116,7 +115,8 @@ function TR_diagHess(
 
     # logs
     TR_stat = (η2 ≤ ρk < Inf) ? "↗" : (ρk < η1 ? "↘" : "=")
-    if verbose > 0
+
+    if verbose > 0 && mod(k,100)==0
       @info @sprintf "%6d %8.1e %8.1e %7.1e %8.1e %7.1e %1s" k fk hk sqrt(ξ) ρk ψ.Δ TR_stat
     end
 
