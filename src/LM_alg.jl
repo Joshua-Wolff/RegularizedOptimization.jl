@@ -49,7 +49,8 @@ function LM(
   start_time = time()
   elapsed_time = 0.0
   # initialize passed options
-  ϵ = options.ϵ
+  ϵ = options.ϵa
+  ϵr = options.ϵr
   verbose = options.verbose
   maxIter = options.maxIter
   maxTime = options.maxTime
@@ -105,8 +106,7 @@ function LM(
   JdFk = similar(Fk)   # temporary storage
   Jt_Fk = similar(∇fk)
 
-  σmax, found_σ = opnorm(Jk)
-  found_σ || error("operator norm computation failed")
+  σmax = opnorm(Jk)
   νInv = (1 + θ) * (σmax^2 + σk)  # ‖J'J + σₖ I‖ = ‖J‖² + σₖ
 
   s = zero(xk)
@@ -158,14 +158,17 @@ function LM(
     ξ1 = fk + hk - mk1(s) + max(1, abs(fk + hk)) * 10 * eps()  # TODO: isn't mk(s) returned by subsolver?
     ξ1 > 0 || error("LM: first prox-gradient step should produce a decrease but ξ1 = $(ξ1)")
 
+    if ξ1 ≥ 0 && k == 1
+      ϵ += ϵr * sqrt(ξ1)  # make stopping test absolute and relative
+    end
+
     if sqrt(ξ1) < ϵ
       # the current xk is approximately first-order stationary
       optimal = true
       continue
     end
 
-    # subsolver_options.ϵ = k == 1 ? 1.0e-4 : max(ϵ, min(1.0e-4, ξ1 / 5))
-    subsolver_options.ϵ = k == 1 ? 1.0e-1 : max(ϵ, min(1.0e-2, ξ1 / 10))
+    subsolver_options.ϵa = k == 1 ? 1.0e-1 : max(ϵ, min(1.0e-2, ξ1 / 10))
     @debug "setting inner stopping tolerance to" subsolver_options.optTol
     s, iter, _ = with_logger(subsolver_logger) do
       subsolver(φ, ∇φ!, ψ, subsolver_options, s)
@@ -213,8 +216,7 @@ function LM(
       Jk = jac_op_residual(nls, xk)
       jtprod_residual!(nls, xk, Fk, ∇fk)
 
-      σmax, found_σ = opnorm(Jk)
-      found_σ || error("operator norm computation failed")
+      σmax = opnorm(Jk)
       νInv = (1 + θ) * (σmax^2 + σk)  # ‖J'J + σₖ I‖ = ‖J‖² + σₖ
 
       Complex_hist[k] += 1
@@ -247,19 +249,16 @@ function LM(
     :exception
   end
 
-  return GenericExecutionStats(
-    status,
-    nls,
-    solution = xk,
-    objective = fk + hk,
-    dual_feas = sqrt(ξ1),
-    iter = k,
-    elapsed_time = elapsed_time,
-    solver_specific = Dict(
-      :Fhist => Fobj_hist[1:k],
-      :Hhist => Hobj_hist[1:k],
-      :NonSmooth => h,
-      :SubsolverCounter => Complex_hist[1:k],
-    ),
-  )
+  stats = GenericExecutionStats(nls)
+  set_status!(stats, status)
+  set_solution!(stats, xk)
+  set_objective!(stats, fk + hk)
+  set_residuals!(stats, zero(eltype(xk)), ξ1 ≥ 0 ? sqrt(ξ1) : ξ1)
+  set_iter!(stats, k)
+  set_time!(stats, elapsed_time)
+  set_solver_specific!(stats, :Fhist, Fobj_hist[1:k])
+  set_solver_specific!(stats, :Hhist, Hobj_hist[1:k])
+  set_solver_specific!(stats, :NonSmooth, h)
+  set_solver_specific!(stats, :SubsolverCounter, Complex_hist[1:k])
+  return stats
 end

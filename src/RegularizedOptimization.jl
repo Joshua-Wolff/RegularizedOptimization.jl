@@ -5,7 +5,7 @@ using LinearAlgebra, Logging, Printf
 include("/Users/joshuawolff/Documents/GERAD/src/LinearOperators.jl/src/LinearOperators.jl")
 
 # external dependencies
-using Arpack, ProximalOperators
+using ProximalOperators, TSVD
 
 # dependencies from us
 using NLPModels, NLPModelsModifiers, SolverCore
