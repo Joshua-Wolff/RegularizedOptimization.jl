@@ -57,7 +57,8 @@ function TR(
   start_time = time()
   elapsed_time = 0.0
   # initialize passed options
-  ϵ = options.ϵ
+  ϵ = options.ϵa
+  ϵr = options.ϵr
   Δk = options.Δk
   verbose = options.verbose
   maxIter = options.maxIter
@@ -116,8 +117,7 @@ function TR(
   quasiNewtTest = isa(f, QuasiNewtonModel)
   Bk = hess_op(f, xk)
 
-  λmax, found_λ = opnorm(Bk)
-  found_λ || error("operator norm computation failed")
+  λmax = opnorm(Bk)
   νInv = (1 + θ) * λmax
 
   optimal = false
@@ -151,13 +151,17 @@ function TR(
     ξ1 = hk - mk1(s) + max(1, abs(hk)) * 10 * eps()
     ξ1 > 0 || error("TR: first prox-gradient step should produce a decrease but ξ1 = $(ξ1)")
 
+    if ξ1 ≥ 0 && k == 1
+      ϵ += ϵr * sqrt(ξ1)  # make stopping test absolute and relative
+    end
+
     if sqrt(ξ1) < ϵ
       # the current xk is approximately first-order stationary
       optimal = true
       continue
     end
 
-    subsolver_options.ϵ = k == 1 ? 1.0e-5 : max(ϵ, min(1e-2, sqrt(ξ1)) * ξ1)
+    subsolver_options.ϵa = k == 1 ? 1.0e-5 : max(ϵ, min(1e-2, sqrt(ξ1)) * ξ1)
     set_radius!(ψ, min(β * χ(s), Δk))
     has_bounds(f) ? set_bounds!(ψ, max.(-ψ.Δ, l_bound-xk), min.(ψ.Δ, u_bound-xk)) : nothing
     s, iter, _ = with_logger(subsolver_logger) do
@@ -206,8 +210,7 @@ function TR(
         push!(f, s, ∇fk - ∇fk⁻)
       end
       Bk = hess_op(f, xk)
-      λmax, found_λ = opnorm(Bk)
-      found_λ || error("operator norm computation failed")
+      λmax = opnorm(Bk)
       νInv = (1 + θ) * λmax
       ∇fk⁻ .= ∇fk
     end
@@ -241,19 +244,16 @@ function TR(
     :exception
   end
 
-  return GenericExecutionStats(
-    status,
-    f,
-    solution = xk,
-    objective = fk + hk,
-    dual_feas = sqrt(ξ1),
-    iter = k,
-    elapsed_time = elapsed_time,
-    solver_specific = Dict(
-      :Fhist => Fobj_hist[1:k],
-      :Hhist => Hobj_hist[1:k],
-      :NonSmooth => h,
-      :SubsolverCounter => Complex_hist[1:k],
-    ),
-  )
+  stats = GenericExecutionStats(f)
+  set_status!(stats, status)
+  set_solution!(stats, xk)
+  set_objective!(stats, fk + hk)
+  set_residuals!(stats, zero(eltype(xk)), ξ1 ≥ 0 ? sqrt(ξ1) : ξ1)
+  set_iter!(stats, k)
+  set_time!(stats, elapsed_time)
+  set_solver_specific!(stats, :Fhist, Fobj_hist[1:k])
+  set_solver_specific!(stats, :Hhist, Hobj_hist[1:k])
+  set_solver_specific!(stats, :NonSmooth, h)
+  set_solver_specific!(stats, :SubsolverCounter, Complex_hist[1:k])
+  return stats
 end

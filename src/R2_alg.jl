@@ -47,22 +47,19 @@ function R2(nlp::AbstractNLPModel, args...; kwargs...)
   kwargs_dict = Dict(kwargs...)
   x0 = pop!(kwargs_dict, :x0, nlp.meta.x0)
   xk, k, outdict = R2(x -> obj(nlp, x), (g, x) -> grad!(nlp, x, g), args..., x0; kwargs_dict...)
-
-  return GenericExecutionStats(
-    outdict[:status],
-    nlp,
-    solution = xk,
-    objective = outdict[:fk] + outdict[:hk],
-    dual_feas = sqrt(outdict[:ξ]),
-    iter = k,
-    elapsed_time = outdict[:elapsed_time],
-    solver_specific = Dict(
-      :Fhist => outdict[:Fhist],
-      :Hhist => outdict[:Hhist],
-      :NonSmooth => outdict[:NonSmooth],
-      :SubsolverCounter => outdict[:Chist],
-    ),
-  )
+  ξ = outdict[:ξ]
+  stats = GenericExecutionStats(nlp)
+  set_status!(stats, outdict[:status])
+  set_solution!(stats, xk)
+  set_objective!(stats, outdict[:fk] + outdict[:hk])
+  set_residuals!(stats, zero(eltype(xk)), ξ ≥ 0 ? sqrt(ξ) : ξ)
+  set_iter!(stats, k)
+  set_time!(stats, outdict[:elapsed_time])
+  set_solver_specific!(stats, :Fhist, outdict[:Fhist])
+  set_solver_specific!(stats, :Hhist, outdict[:Hhist])
+  set_solver_specific!(stats, :NonSmooth, outdict[:NonSmooth])
+  set_solver_specific!(stats, :SubsolverCounter, outdict[:Chist])
+  return stats
 end
 
 """
@@ -86,7 +83,8 @@ function R2(
 ) where {F <: Function, G <: Function, H, R <: Real}
   start_time = time()
   elapsed_time = 0.0
-  ϵ = options.ϵ
+  ϵ = options.ϵa
+  ϵr = options.ϵr
   neg_tol = options.neg_tol
   verbose = options.verbose
   maxIter = options.maxIter
@@ -158,6 +156,10 @@ function R2(
     Complex_hist[k] += 1
     mks = mk(s)
     ξ = hk - mks + max(1, abs(hk)) * 10 * eps()
+
+    if ξ ≥ 0 && k == 1
+      ϵ += ϵr * sqrt(ξ)  # make stopping test absolute and relative
+    end
     
     if (ξ < 0 && sqrt(-ξ) ≤ -neg_tol) || (ξ ≥ 0 && sqrt(ξ) ≤ ϵ)
       optimal = true
